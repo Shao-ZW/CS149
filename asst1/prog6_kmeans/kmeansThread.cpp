@@ -18,6 +18,9 @@ typedef struct {
   int *clusterAssignments;
   double *currCost;
   int M, N, K;
+
+  int threadId;
+  int numThreads;
 } WorkerArgs;
 
 
@@ -64,29 +67,84 @@ double dist(double *x, double *y, int nDim) {
 /**
  * Assigns each data point to its "closest" cluster centroid.
  */
-void computeAssignments(WorkerArgs *const args) {
-  double *minDist = new double[args->M];
-  
-  // Initialize arrays
-  for (int m =0; m < args->M; m++) {
+
+void computeAssignmentsThread(WorkerArgs *const args, double *minDist) {
+  int m_start = args->M / args->numThreads * args->threadId;
+  int m_end = (args->threadId == args->numThreads - 1) ? args->M : m_start + args->M / args->numThreads;
+
+  for (int m = m_start; m < m_end; m++) {
     minDist[m] = 1e30;
     args->clusterAssignments[m] = -1;
   }
 
-  // Assign datapoints to closest centroids
   for (int k = args->start; k < args->end; k++) {
-    for (int m = 0; m < args->M; m++) {
-      double d = dist(&args->data[m * args->N],
-                      &args->clusterCentroids[k * args->N], args->N);
+    for (int m = m_start; m < m_end; m++) {
+      double d = dist(&args->data[m * args->N], &args->clusterCentroids[k * args->N], args->N);
       if (d < minDist[m]) {
         minDist[m] = d;
         args->clusterAssignments[m] = k;
       }
     }
   }
+}
+
+void computeAssignments(WorkerArgs *const args) {
+  static constexpr int numThreads = 16;
+  std::thread workers[numThreads];
+  WorkerArgs wargs[numThreads];
+  
+  for (int i = 0; i < numThreads; i++) {
+    wargs[i].clusterAssignments = args->clusterAssignments;
+    wargs[i].clusterCentroids = args->clusterCentroids;
+    wargs[i].currCost = args->currCost;
+    wargs[i].data = args->data;
+    wargs[i].K = args->K;
+    wargs[i].M = args->M;
+    wargs[i].N = args->N;
+    wargs[i].start = args->start;
+    wargs[i].end = args->end;
+    wargs[i].threadId = i;
+    wargs[i].numThreads = numThreads;
+  }
+
+  double *minDist = new double[args->M];
+
+  for (int i = 1; i < numThreads; i++) {
+    workers[i] = std::thread(computeAssignmentsThread, &wargs[i], minDist);
+  }
+
+  computeAssignmentsThread(&wargs[0], minDist);
+
+  for (int i = 1; i < numThreads; i++) {
+    workers[i].join();
+  }
 
   free(minDist);
 }
+
+// void computeAssignments(WorkerArgs *const args) {
+//   double *minDist = new double[args->M];
+  
+//   // Initialize arrays
+//   for (int m =0; m < args->M; m++) {
+//     minDist[m] = 1e30;
+//     args->clusterAssignments[m] = -1;
+//   }
+
+//   // Assign datapoints to closest centroids
+//   for (int k = args->start; k < args->end; k++) {
+//     for (int m = 0; m < args->M; m++) {
+//       double d = dist(&args->data[m * args->N],
+//                       &args->clusterCentroids[k * args->N], args->N);
+//       if (d < minDist[m]) {
+//         minDist[m] = d;
+//         args->clusterAssignments[m] = k;
+//       }
+//     }
+//   }
+
+//   free(minDist);
+// }
 
 /**
  * Given the cluster assignments, computes the new centroid locations for
@@ -206,10 +264,19 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     // Setup args struct
     args.start = 0;
     args.end = K;
-
+    
+    // double Time0 = CycleTimer::currentSeconds();
     computeAssignments(&args);
+    // double Time1 = CycleTimer::currentSeconds();
+    // printf("[Assignment]: %.3f ms\n", (Time1 - Time0) * 1000);
+
     computeCentroids(&args);
+    // double Time2 = CycleTimer::currentSeconds();
+    // printf("[Centroid]: %.3f ms\n", (Time2 - Time1) * 1000);
+
     computeCost(&args);
+    // double Time3 = CycleTimer::currentSeconds();
+    // printf("[Cost]: %.3f ms\n", (Time3 - Time2) * 1000);
 
     iter++;
   }

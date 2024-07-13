@@ -22,6 +22,23 @@ extern void mandelbrotSerial(
     int maxIterations,
     int output[]);
 
+static inline int mandel(float c_re, float c_im, int count)
+{
+    float z_re = c_re, z_im = c_im;
+    int i;
+    for (i = 0; i < count; ++i) {
+
+        if (z_re * z_re + z_im * z_im > 4.f)
+            break;
+
+        float new_re = z_re*z_re - z_im*z_im;
+        float new_im = 2.f * z_re * z_im;
+        z_re = c_re + new_re;
+        z_im = c_im + new_im;
+    }
+
+    return i;
+}
 
 //
 // workerThreadStart --
@@ -35,7 +52,26 @@ void workerThreadStart(WorkerArgs * const args) {
     // program that uses two threads, thread 0 could compute the top
     // half of the image and thread 1 could compute the bottom half.
 
-    printf("Hello world from thread %d\n", args->threadId);
+    //double startTime = CycleTimer::currentSeconds();
+    unsigned width = args->width;
+    unsigned height = args->height;
+
+    float dx = (args->x1 - args->x0) / width;
+    float dy = (args->y1 - args->y0) / height;
+    int len = args->numThreads;
+    int startRow = args->threadId;
+
+    for (unsigned int j = startRow; j < height; j += len) {
+        for (unsigned int i = 0; i < width; ++i) {
+            float x = args->x0 + i * dx;
+            float y = args->y0 + j * dy;
+
+            int index = (j * width + i);
+            args->output[index] = mandel(x, y, args->maxIterations);
+        }
+    }
+    // double endTime = CycleTimer::currentSeconds();
+    // printf("thread %d: %.3fms\n", args->threadId, (endTime - startTime) * 1000);
 }
 
 //
