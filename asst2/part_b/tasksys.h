@@ -2,6 +2,13 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <thread>
+#include <unordered_map>
+#include <queue>
+#include <list>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -53,6 +60,20 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         void sync();
 };
 
+struct Task{
+    IRunnable* runnable;
+    int num_total_works;
+    std::vector<TaskID> deps;
+
+    int current_work_id;
+    int num_done_works;
+    int num_left_deps;
+
+    Task(IRunnable* runnable, int num_total_works, const std::vector<TaskID>& deps, int current_work_id, int num_done_works, int num_left_deps)
+        : runnable(runnable), num_total_works(num_total_works), deps(deps),
+          current_work_id(current_work_id), num_done_works(num_done_works), num_left_deps(num_left_deps) {}
+};
+
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
  * optimized implementation of a parallel task execution engine that uses
@@ -68,6 +89,19 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+    private:
+        bool stop;
+        int num_threads;
+        std::vector<std::thread> threads;
+        
+        std::vector<std::shared_ptr<std::mutex>> tlks;
+        std::mutex lk;
+        std::condition_variable cv;
+        std::vector<Task> tasks;
+        std::queue<TaskID> ready_tasks;
+        std::list<TaskID> waiting_tasks;
+        std::vector<TaskID> done_tasks;
+        int taskid_cnt;
 };
 
 #endif
